@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  cognee:
+    container_name: cognee-ollama
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount the .env file
+      - ./.env:/app/.env
+      # Persist Cognee's data
+      - cognee_data:/app/.cognee_data
+      - cognee_system:/app/.cognee_system
+    environment:
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - ENVIRONMENT=local
+      - LOG_LEVEL=INFO
+      # These will be read from .env file
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - LLM_ENDPOINT=${LLM_ENDPOINT}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - EMBEDDING_ENDPOINT=${EMBEDDING_ENDPOINT}
+    extra_hosts:
+      # Allows the container to reach your local machine's Ollama
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8001:8000"  # Cognee API (mapped to 8001 to avoid conflicts)
+      - "5678:5678"  # Debugger port (if needed)
+    networks:
+      - cognee-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  cognee-network:
+    name: cognee-ollama-network
+
+volumes:
+  cognee_data:
+    name: cognee_ollama_data
+  cognee_system:
+    name: cognee_ollama_system

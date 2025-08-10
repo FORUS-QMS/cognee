@@ -1,0 +1,62 @@
+services:
+  # Ollama service for local LLM
+  ollama:
+    container_name: cognee-ollama
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - cognee-network
+    environment:
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+
+  # Cognee main application
+  cognee:
+    container_name: cognee-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - ollama
+    volumes:
+      # Mount the .env file
+      - ./.env.docker:/app/.env
+      # Persist Cognee's data
+      - cognee_data:/app/.cognee_data
+      - cognee_system:/app/.cognee_system
+    environment:
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      # LLM Settings (Ollama)
+      - LLM_API_KEY=ollama
+      - LLM_MODEL=llama3.2:3b
+      - LLM_PROVIDER=ollama
+      - LLM_ENDPOINT=http://ollama:11434/v1
+      # Embedding Settings (Ollama)
+      - EMBEDDING_PROVIDER=ollama
+      - EMBEDDING_MODEL=nomic-embed-text
+      - EMBEDDING_ENDPOINT=http://ollama:11434/api/embeddings
+      - EMBEDDING_DIMENSIONS=768
+      - HUGGINGFACE_TOKENIZER=sentence-transformers/all-MiniLM-L6-v2
+      # Database Settings (using defaults)
+      - DB_PROVIDER=sqlite
+      - GRAPH_DATABASE_PROVIDER=kuzu
+      - VECTOR_DB_PROVIDER=lancedb
+    ports:
+      - "8000:8000"
+    networks:
+      - cognee-network
+
+networks:
+  cognee-network:
+    name: cognee-network
+
+volumes:
+  ollama_data:
+  cognee_data:
+  cognee_system:

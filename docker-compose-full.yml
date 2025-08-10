@@ -1,0 +1,173 @@
+version: '3.8'
+
+services:
+  # Ollama service for local LLM
+  ollama:
+    container_name: cognee-ollama-llm
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./scripts/setup-ollama.sh:/setup-ollama.sh:ro
+    ports:
+      - "11434:11434"
+    networks:
+      - cognee-network
+    environment:
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL database (optional - can use SQLite instead)
+  postgres:
+    container_name: cognee-postgres
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: cognee
+      POSTGRES_PASSWORD: cognee_password
+      POSTGRES_DB: cognee_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - cognee-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching (optional)
+  redis:
+    container_name: cognee-redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - cognee-network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Cognee main application
+  cognee:
+    container_name: cognee-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      ollama:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount the .env file
+      - ./.env.docker:/app/.env
+      # Persist Cognee's data
+      - cognee_data:/app/.cognee_data
+      - cognee_system:/app/.cognee_system
+    environment:
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      # LLM Settings (Ollama)
+      - LLM_API_KEY=ollama
+      - LLM_MODEL=llama3.2:3b
+      - LLM_PROVIDER=ollama
+      - LLM_ENDPOINT=http://ollama:11434/v1
+      - LLM_MAX_TOKENS=4096
+      # Embedding Settings (Ollama)
+      - EMBEDDING_PROVIDER=ollama
+      - EMBEDDING_MODEL=nomic-embed-text
+      - EMBEDDING_ENDPOINT=http://ollama:11434/api/embeddings
+      - EMBEDDING_DIMENSIONS=768
+      - EMBEDDING_MAX_TOKENS=8192
+      - HUGGINGFACE_TOKENIZER=sentence-transformers/all-MiniLM-L6-v2
+      # Database Settings (using PostgreSQL instead of SQLite)
+      - DB_PROVIDER=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=cognee_db
+      - DB_USER=cognee
+      - DB_PASSWORD=cognee_password
+      # Graph Database (default)
+      - GRAPH_DATABASE_PROVIDER=kuzu
+      # Vector Database (default)
+      - VECTOR_DB_PROVIDER=lancedb
+      # Redis Cache
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "8000:8000"  # Cognee API
+      - "5678:5678"  # Debugger port (if needed)
+    networks:
+      - cognee-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: Jupyter notebook for experiments
+  jupyter:
+    container_name: cognee-jupyter
+    image: jupyter/datascience-notebook:latest
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=cognee_jupyter_token
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - cognee_data:/home/jovyan/cognee_data:ro
+    networks:
+      - cognee-network
+    depends_on:
+      - cognee
+
+  # Optional: pgAdmin for PostgreSQL management
+  pgadmin:
+    container_name: cognee-pgadmin
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cognee.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    networks:
+      - cognee-network
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+networks:
+  cognee-network:
+    name: cognee-full-network
+    driver: bridge
+
+volumes:
+  ollama_data:
+    name: cognee_ollama_data
+  postgres_data:
+    name: cognee_postgres_data
+  redis_data:
+    name: cognee_redis_data
+  cognee_data:
+    name: cognee_app_data
+  cognee_system:
+    name: cognee_app_system
+  pgadmin_data:
+    name: cognee_pgadmin_data
