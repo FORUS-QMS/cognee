@@ -6,28 +6,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cognee is a memory layer for AI agents that enables dynamic knowledge graph construction from various data sources. It provides an ECL (Extract, Cognify, Load) pipeline architecture for building intelligent memory systems that can understand relationships and context.
 
-## Global MCP Server Setup
+## Current Infrastructure
 
-Cognee is configured as a global MCP (Model Context Protocol) server for Claude Code, making its tools available across all projects.
+### Running Services
+- **Cognee**: Running in Docker on port `8002` (container: cognee-app)
+- **Ollama**: Running in Docker on port `55000` (container: Ollama)
+- **Required Models**: 
+  - LLM: `llama3.2:3b`
+  - Embeddings: `nomic-embed-text`
 
-### Available MCP Tools
-- **cognify**: Transform data into structured knowledge graphs
-- **codify**: Analyze code repositories and build code graphs
-- **search**: Query knowledge with multiple search types (GRAPH_COMPLETION, RAG_COMPLETION, etc.)
-- **list_data**: List all datasets and data items
-- **delete**: Remove specific data from datasets
-- **prune**: Reset Cognee memory completely
-- **cognify_status/codify_status**: Check processing status
+### Environment Configuration
+The `.env` file is configured for Docker-to-Docker communication:
+- LLM endpoint: `http://host.docker.internal:55000/v1`
+- Embedding endpoint: `http://host.docker.internal:55000/api/embeddings`
 
-### MCP Configuration
-The Cognee MCP server is configured globally via:
-- **Runner Script**: `~/bin/cognee-mcp-runner.sh`
-- **Scope**: User-level (available across all projects)
-- **Transport**: stdio (standard for Claude Code)
+## Global MCP Servers
 
-To verify MCP is working:
+Three MCP servers are configured globally in Claude Code:
+
+### 1. Cognee MCP
+- **Command**: `~/bin/cognee-mcp-runner.sh`
+- **Tools**: cognify, codify, search, list_data, delete, prune, status checks
+- **Purpose**: Knowledge graph operations and memory management
+
+### 2. MongoDB MCP
+- **Command**: `npx -y mongodb-mcp-server@latest --connectionString mongodb://localhost:27017 --readOnly`
+- **Tools**: Database queries and operations
+- **Purpose**: Persistent data storage
+
+### 3. Docker MCP
+- **Command**: `docker mcp gateway run`
+- **Tools**: Docker operations (containers, compose, logs)
+- **Purpose**: Container management without bash commands
+
+To verify MCP servers:
 ```bash
-claude mcp list  # Should show cognee server
+claude mcp list  # Shows all three servers with connection status
 ```
 
 ## Development Commands
@@ -45,85 +59,49 @@ cp .env.template .env
 # Edit .env with your LLM_API_KEY at minimum (or use Ollama setup below)
 ```
 
-### Ollama Setup (Local LLMs)
+### Docker Services Management
 
-Cognee supports using Ollama for both LLM inference and embeddings. **Note**: Cognee does NOT create custom embeddings in Ollama - it uses pre-existing embedding models from Ollama's model library.
+#### Current Setup
+- **Ollama**: Running in Docker on port `55000` (container name: Ollama)
+- **Cognee**: Running in Docker on port `8002` (container name: cognee-app)
+- **Models**: llama3.2:3b (LLM), nomic-embed-text (embeddings)
 
-### Basic Ollama Integration
-
-#### 1. Install and Start Ollama
+#### Managing Services
 ```bash
-# Install Ollama (macOS/Linux)
-curl -fsSL https://ollama.com/install.sh | sh
+# Check service status
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-# Start Ollama server
-ollama serve
+# Restart services if needed
+docker restart cognee-app
+docker restart Ollama
 
-# Or via Docker
-docker run -d --name ollama -p 11434:11434 ollama/ollama
+# Pull required models in Ollama
+docker exec Ollama ollama pull llama3.2:3b
+docker exec Ollama ollama pull nomic-embed-text
+
+# Check Ollama models
+docker exec Ollama ollama list
+
+# View Cognee logs
+docker logs cognee-app --tail 20
 ```
 
-#### 2. Pull Required Models
-```bash
-# Pull LLM model (choose one)
-ollama pull llama3.1:8b          # Smaller, faster
-ollama pull phi4                  # Microsoft's efficient model
-ollama pull mistral               # Good balance of speed/quality
-
-# Pull embedding model (required for vector search)
-ollama pull avr/sfr-embedding-mistral:latest  # 4096 dimensions
-# Alternative embedding models:
-# ollama pull nomic-embed-text     # 768 dimensions, faster
-# ollama pull mxbai-embed-large    # 1024 dimensions
-```
-
-#### 3. Configure .env for Ollama
+#### Environment Configuration
+The `.env` file is configured for Docker-to-Docker communication:
 ```bash
 # LLM Configuration
 LLM_API_KEY="ollama"
-LLM_MODEL="llama3.1:8b"  # Must match pulled model name
+LLM_MODEL="llama3.2:3b"
 LLM_PROVIDER="ollama"
-LLM_ENDPOINT="http://localhost:11434/v1"
+LLM_ENDPOINT="http://host.docker.internal:55000/v1"
 
 # Embedding Configuration
 EMBEDDING_PROVIDER="ollama"
-EMBEDDING_MODEL="avr/sfr-embedding-mistral:latest"  # Must match pulled model
-EMBEDDING_ENDPOINT="http://localhost:11434/api/embeddings"
-EMBEDDING_DIMENSIONS=4096  # Must match model dimensions
-HUGGINGFACE_TOKENIZER="Salesforce/SFR-Embedding-Mistral"  # For tokenization
+EMBEDDING_MODEL="nomic-embed-text"
+EMBEDDING_ENDPOINT="http://host.docker.internal:55000/api/embeddings"
+EMBEDDING_DIMENSIONS=768
+HUGGINGFACE_TOKENIZER="sentence-transformers/all-MiniLM-L6-v2"
 ```
-
-### Ollama MCP Integration
-
-**Important Discovery**: Ollama can use MCP servers (not just Claude Code!) through community solutions:
-
-1. **ollama-mcp-bridge**: TypeScript bridge connecting Ollama to any MCP server
-2. **mcp-client-for-ollama (ollmcp)**: Python TUI with multi-server support
-3. **Dolphin MCP**: Clean Python API for Ollama + MCP
-
-This enables Ollama to directly access Cognee's knowledge graphs via MCP:
-
-```bash
-# Install MCP client for Ollama
-pip install ollmcp
-
-# Connect Ollama to Cognee MCP server
-ollmcp stdio "~/bin/cognee-mcp-runner.sh"
-
-# Now Ollama has access to all Cognee tools:
-# - cognee.search()
-# - cognee.cognify()
-# - cognee.add()
-# etc.
-```
-
-#### Key Points about Ollama in Cognee:
-- **LLM Endpoint**: Uses OpenAI-compatible endpoint at `/v1`
-- **Embedding Endpoint**: Uses Ollama's native endpoint at `/api/embeddings`
-- **MCP Support**: Can connect to Cognee MCP server for knowledge access
-- **Tokenizer**: Uses HuggingFace tokenizer for text chunking (not Ollama)
-- **Dimensions**: Must match the actual embedding model dimensions
-- **No Custom Embeddings**: Cognee uses standard Ollama models, doesn't train custom ones
 
 ### Running Tests
 ```bash
